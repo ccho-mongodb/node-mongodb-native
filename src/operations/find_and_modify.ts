@@ -1,5 +1,4 @@
 import ReadPreference = require('../read_preference');
-import { OperationBase } from './operation';
 import {
   maxWireVersion,
   applyRetryableWrites,
@@ -8,17 +7,18 @@ import {
   formattedOrderClause,
   handleCallback
 } from '../utils';
-import { executeCommand } from './db_ops';
 import { MongoError } from '../error';
+import CommandOperation = require('./command');
+import { defineAspects, Aspect } from './operation';
 
-class FindAndModifyOperation extends OperationBase {
+class FindAndModifyOperation extends CommandOperation {
   collection: any;
   query: any;
   sort: any;
   doc: any;
 
   constructor(collection: any, query: any, sort: any, doc: any, options: any) {
-    super(options);
+    super(collection, options);
 
     this.collection = collection;
     this.query = query;
@@ -26,7 +26,7 @@ class FindAndModifyOperation extends OperationBase {
     this.doc = doc;
   }
 
-  execute(callback: Function) {
+  execute(server: any, callback: Function) {
     const coll = this.collection;
     const query = this.query;
     const sort = formattedOrderClause(this.sort);
@@ -109,7 +109,7 @@ class FindAndModifyOperation extends OperationBase {
     }
 
     // Execute the command
-    executeCommand(coll.s.db, queryObject, options, (err?: any, result?: any) => {
+    super.executeCommand(server, queryObject, (err?: any, result?: any) => {
       if (err) return handleCallback(callback, err, null);
 
       return handleCallback(callback, null, result);
@@ -117,4 +117,48 @@ class FindAndModifyOperation extends OperationBase {
   }
 }
 
-export = FindAndModifyOperation;
+class FindOneAndDeleteOperation extends FindAndModifyOperation {
+  constructor(collection: any, filter: any, options: any) {
+    // Final options
+    const finalOptions = Object.assign({}, options);
+    finalOptions.fields = options.projection;
+    finalOptions.remove = true;
+
+    super(collection, filter, finalOptions.sort, null, finalOptions);
+  }
+}
+
+class FindOneAndReplaceOperation extends FindAndModifyOperation {
+  constructor(collection: any, filter: any, replacement: any, options: any) {
+    // Final options
+    const finalOptions = Object.assign({}, options);
+    finalOptions.fields = options.projection;
+    finalOptions.update = true;
+    finalOptions.new = options.returnOriginal !== void 0 ? !options.returnOriginal : false;
+    finalOptions.upsert = options.upsert !== void 0 ? !!options.upsert : false;
+
+    super(collection, filter, finalOptions.sort, replacement, finalOptions);
+  }
+}
+
+class FindOneAndUpdateOperation extends FindAndModifyOperation {
+  constructor(collection: any, filter: any, update: any, options: any) {
+    // Final options
+    const finalOptions = Object.assign({}, options);
+    finalOptions.fields = options.projection;
+    finalOptions.update = true;
+    finalOptions.new =
+      typeof options.returnOriginal === 'boolean' ? !options.returnOriginal : false;
+    finalOptions.upsert = typeof options.upsert === 'boolean' ? options.upsert : false;
+
+    super(collection, filter, finalOptions.sort, update, finalOptions);
+  }
+}
+
+defineAspects(FindAndModifyOperation, [Aspect.WRITE_OPERATION, Aspect.EXECUTE_WITH_SELECTION]);
+export {
+  FindAndModifyOperation,
+  FindOneAndDeleteOperation,
+  FindOneAndReplaceOperation,
+  FindOneAndUpdateOperation
+}
